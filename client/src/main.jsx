@@ -16,7 +16,8 @@ function App(){
  const nav=[['discover',Home,'Discover'],['rewards',Gift,'Rewards'],['leaderboard',Trophy,'Leaderboard'],...(user?.isAdmin?[['admin',ShieldCheck,'Admin']]:[])];
  const percent=Math.min(100,(user?.xp||0)/100000*100);
  const demoUsd=user?Math.min(300,1+Math.floor((user.xp||0)/50)*0.30):0;
- const demoMoney=' className="shell">
+ const demoMoney=String.fromCharCode(36)+demoUsd.toFixed(2);
+ return <div className="shell">
  <aside className={'sidebar '+(menu?'open':'')}><div className="brand"><div className="brand-icon"><Music2 size={22}/></div><span>AD<span className="accent">EARN</span></span><button className="close" aria-label="Close menu" onClick={()=>setMenu(false)}><X size={20}/></button></div><p className="side-label">FAN SPACE</p>{nav.map(([id,Icon,label])=><button key={id} className={'nav '+(tab===id?'selected':'')} onClick={()=>{setTab(id);setMenu(false)}}><Icon size={19}/>{label}</button>)}<div className="side-bottom">● SEASON 01 · GRANDMEISTER</div></aside>
  <main><header><button className="hamburger" aria-label="Open menu" onClick={()=>setMenu(!menu)}><Menu/></button><span className="eyebrow">WATCH AND EARN</span><div className="header-right">{user?<><span className="user-pill">{user.name}</span><button className="icon-button" aria-label="Sign out" onClick={logout}><LogOut size={18}/></button></>:<span className="guest-pill">Guest access</span>}</div></header>
  <div className="content">{notice&&<button className="notice" onClick={()=>setNotice('')}>{notice} ×</button>}
