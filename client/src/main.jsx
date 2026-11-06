@@ -2,7 +2,7 @@ import React,{useEffect,useState} from 'react';
 import{createRoot}from'react-dom/client';
 import{Play,Music2,Home,Gift,Trophy,LogOut,Plus,Lock,CheckCircle2,ExternalLink,Menu,X,Flame,ShieldCheck}from'lucide-react';
 import './style.css';
-const API=import.meta.env.VITE_API_URL||'http://localhost:4000';
+const API=import.meta.env.DEV?'http://localhost:4000':'';
 async function request(path,method='GET',body){const response=await fetch(API+path,{method,headers:{'Content-Type':'application/json'},credentials:'include',body:body?JSON.stringify(body):undefined});const payload=await response.json();if(!response.ok)throw Error(payload.error||'Request failed');return payload}
 function App(){
  const[user,setUser]=useState(null),[videos,setVideos]=useState([]),[tab,setTab]=useState('discover'),[loading,setLoading]=useState(true),[authMode,setAuthMode]=useState('login'),[form,setForm]=useState({name:'',email:'',password:''}),[error,setError]=useState(''),[notice,setNotice]=useState(''),[url,setUrl]=useState(''),[title,setTitle]=useState(''),[menu,setMenu]=useState(false);
