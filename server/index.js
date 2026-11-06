@@ -1,0 +1,38 @@
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import pg from 'pg';
+
+const {DATABASE_URL,JWT_SECRET,CLIENT_ORIGIN='http://localhost:5173',ADMIN_EMAIL,PORT=4000,NODE_ENV}=process.env;
+if(!DATABASE_URL||!JWT_SECRET||JWT_SECRET.length<32) throw Error('DATABASE_URL and a JWT_SECRET (32+ chars) are required');
+const pool=new pg.Pool({connectionString:DATABASE_URL,ssl:process.env.PGSSL==='true'?{rejectUnauthorized:true}:undefined});
+const app=express();
+app.use(helmet());
+app.use(cors({origin:CLIENT_ORIGIN.split(',').map(x=>x.trim()),credentials:true}));
+app.use(express.json({limit:'10kb'}));
+app.use(cookieParser());
+app.use('/api/auth',rateLimit({windowMs:15*60*1000,limit:25,standardHeaders:'draft-7',legacyHeaders:false}));
+const q=(s,p=[])=>pool.query(s,p);
+const safe=u=>({id:u.id,name:u.name,email:u.email,xp:Number(u.xp),isAdmin:u.is_admin});
+const cookies={httpOnly:true,secure:NODE_ENV==='production',sameSite:NODE_ENV==='production'?'none':'lax',path:'/',maxAge:604800000};
+const sign=u=>jwt.sign({sub:u.id},JWT_SECRET,{expiresIn:'7d'});
+const wrap=f=>(req,res,next)=>Promise.resolve(f(req,res,next)).catch(next);
+const authenticate=wrap(async(req,res,next)=>{try{const token=req.cookies.adearn_session;if(!token)return res.status(401).json({error:'Sign in required'});const claims=jwt.verify(token,JWT_SECRET);const {rows}=await q('SELECT * FROM users WHERE id=$1',[claims.sub]);if(!rows.length)return res.status(401).json({error:'Account not found'});req.user=rows[0];next()}catch{return res.status(401).json({error:'Session expired'})}});
+const admin=(req,res,next)=>req.user.is_admin?next():res.status(403).json({error:'Admin only'});
+app.post('/api/auth/register',wrap(async(req,res)=>{const {name,email,password}=req.body||{};if(typeof name!=='string'||name.trim().length<2||name.length>80||typeof email!=='string'||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||typeof password!=='string'||password.length<8||password.length>128)return res.status(400).json({error:'Valid name, email and password (8+ characters) required'});const e=email.trim().toLowerCase();try{const {rows}=await q('INSERT INTO users(name,email,password_hash,is_admin) VALUES($1,$2,$3,$4) RETURNING *',[name.trim(),e,await bcrypt.hash(password,12),Boolean(ADMIN_EMAIL&&e===ADMIN_EMAIL.trim().toLowerCase())]);res.cookie('adearn_session',sign(rows[0]),cookies).json({user:safe(rows[0])})}catch(err){if(err.code==='23505')return res.status(409).json({error:'Email already registered'});throw err}}));
+app.post('/api/auth/login',wrap(async(req,res)=>{const {email,password}=req.body||{};if(typeof email!=='string'||typeof password!=='string')return res.status(400).json({error:'Invalid credentials'});const {rows}=await q('SELECT * FROM users WHERE email=$1',[email.trim().toLowerCase()]);if(!rows.length||!(await bcrypt.compare(password,rows[0].password_hash)))return res.status(401).json({error:'Invalid credentials'});res.cookie('adearn_session',sign(rows[0]),cookies).json({user:safe(rows[0])})}));
+app.post('/api/auth/logout',(_req,res)=>res.clearCookie('adearn_session',{path:'/',secure:cookies.secure,sameSite:cookies.sameSite}).json({ok:true}));
+app.get('/api/me',authenticate,(req,res)=>res.json({user:safe(req.user)}));
+app.get('/api/videos',wrap(async(_req,res)=>{const {rows}=await q('SELECT id,title,youtube_id AS "youtubeId" FROM videos ORDER BY created_at DESC');res.json({videos:rows})}));
+function youtubeId(link){try{const u=new URL(link);const h=u.hostname.toLowerCase();let id;if(h==='youtu.be')id=u.pathname.split('/')[1];else if(['youtube.com','www.youtube.com','m.youtube.com'].includes(h))id=u.pathname==='/watch'?u.searchParams.get('v'):u.pathname.match(/^\/(?:shorts|embed)\/([^/]+)/)?.[1];return /^[a-zA-Z0-9_-]{11}$/.test(id||'')?id:null}catch{return null}}
+app.post('/api/videos',authenticate,admin,wrap(async(req,res)=>{const {title,url}=req.body||{};const videoId=typeof url==='string'?youtubeId(url):null;if(typeof title!=='string'||!title.trim()||title.length>150||!videoId)return res.status(400).json({error:'Valid title and YouTube URL required'});const {rows}=await q('INSERT INTO videos(title,youtube_id) VALUES($1,$2) RETURNING id,title,youtube_id AS "youtubeId"',[title.trim(),videoId]);res.status(201).json({video:rows[0]})}));
+app.delete('/api/videos/:id',authenticate,admin,wrap(async(req,res)=>{if(!/^[0-9a-f-]{36}$/i.test(req.params.id))return res.status(400).json({error:'Invalid video ID'});await q('DELETE FROM videos WHERE id=$1',[req.params.id]);res.json({ok:true})}));
+app.post('/api/checkin',authenticate,wrap(async(req,res)=>{const client=await pool.connect();try{await client.query('BEGIN');const result=await client.query("INSERT INTO checkins(user_id,day) VALUES($1,(NOW() AT TIME ZONE 'UTC')::date) ON CONFLICT DO NOTHING RETURNING user_id",[req.user.id]);if(!result.rowCount){await client.query('ROLLBACK');return res.status(409).json({error:'You already checked in today'})}await client.query('UPDATE users SET xp=xp+50 WHERE id=$1',[req.user.id]);await client.query('COMMIT');res.json({earned:50})}catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}}));
+app.get('/api/health',(_req,res)=>res.json({ok:true}));
+app.use((err,req,res,next)=>{console.error(err);res.status(500).json({error:'Internal server error'})});
+app.listen(PORT,()=>console.log('ADEARN API listening on '+PORT));
