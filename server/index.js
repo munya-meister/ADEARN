@@ -11,7 +11,7 @@ import pg from 'pg';
 
 const {DATABASE_URL,JWT_SECRET,CLIENT_ORIGIN='http://localhost:5173',ADMIN_EMAIL,PORT=4000,NODE_ENV}=process.env;
 if(!DATABASE_URL||!JWT_SECRET||JWT_SECRET.length<32) throw Error('DATABASE_URL and a JWT_SECRET (32+ chars) are required');
-const pool=new pg.Pool({connectionString:DATABASE_URL,ssl:process.env.PGSSL==='true'?{rejectUnauthorized:true}:undefined});
+const pool=new pg.Pool({connectionString:DATABASE_URL,ssl:process.env.PGSSL==='true'?{rejectUnauthorized:true}:undefined,options:'-c search_path=adearn'});
 const app=express();
 app.use(helmet());
 app.use(cors({origin:CLIENT_ORIGIN.split(',').map(x=>x.trim()),credentials:true}));
@@ -67,6 +67,8 @@ app.post('/api/chipbase/subscribers',authenticate,admin,wrap(async(req,res)=>{
 }));
 app.get('/api/health',(_req,res)=>res.json({ok:true}));
 app.use((err,req,res,next)=>{console.error(err);res.status(500).json({error:'Internal server error'})});
+// Bootstrap a dedicated schema; all ADEARN queries are confined to its search_path.
+await pool.query('CREATE SCHEMA IF NOT EXISTS adearn');
 await pool.query(await readFile(new URL('./schema.sql',import.meta.url),'utf8'));
 await pool.query(await readFile(new URL('./seed.sql',import.meta.url),'utf8'));
 app.listen(PORT,()=>console.log('ADEARN API listening on '+PORT));
