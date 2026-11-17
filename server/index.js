@@ -59,7 +59,7 @@ app.get('/api/chipbase/subscribers',authenticate,admin,wrap(async(_req,res)=>{
 app.post('/api/chipbase/subscribers',authenticate,admin,wrap(async(req,res)=>{
   const {title,name,email}=req.body||{};
   if(typeof name!=='string'||name.trim().length<2||name.length>80||
-     typeof email!=='string'||!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)||email.length>254||
+     typeof email!=='string'||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254||
      (title!==undefined&&(typeof title!=='string'||title.length>100)))
     return res.status(400).json({error:'Valid subscriber name and email required'});
   const result=await chipbaseSubscribers('POST',{name:name.trim(),email:email.trim().toLowerCase(),...(title?{title:title.trim()}:{})});
