@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://adearn-api.onrender.com/api/:path*"
+      "destination": "https://adearn-api-frankfurt.onrender.com/api/:path*"
     }
   ]
 }
