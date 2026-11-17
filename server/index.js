@@ -34,6 +34,37 @@ function youtubeId(link){try{const u=new URL(link);const h=u.hostname.toLowerCas
 app.post('/api/videos',authenticate,admin,wrap(async(req,res)=>{const {title,url}=req.body||{};const videoId=typeof url==='string'?youtubeId(url):null;if(typeof title!=='string'||!title.trim()||title.length>150||!videoId)return res.status(400).json({error:'Valid title and YouTube URL required'});const {rows}=await q('INSERT INTO videos(title,youtube_id) VALUES($1,$2) RETURNING id,title,youtube_id AS "youtubeId"',[title.trim(),videoId]);res.status(201).json({video:rows[0]})}));
 app.delete('/api/videos/:id',authenticate,admin,wrap(async(req,res)=>{if(!/^[0-9a-f-]{36}$/i.test(req.params.id))return res.status(400).json({error:'Invalid video ID'});await q('DELETE FROM videos WHERE id=$1',[req.params.id]);res.json({ok:true})}));
 app.post('/api/checkin',authenticate,wrap(async(req,res)=>{const client=await pool.connect();try{await client.query('BEGIN');const result=await client.query("INSERT INTO checkins(user_id,day) VALUES($1,(NOW() AT TIME ZONE 'UTC')::date) ON CONFLICT DO NOTHING RETURNING user_id",[req.user.id]);if(!result.rowCount){await client.query('ROLLBACK');return res.status(409).json({error:'You already checked in today'})}await client.query('UPDATE users SET xp=xp+50 WHERE id=$1',[req.user.id]);await client.query('COMMIT');res.json({earned:50})}catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}}));
+// Chipbase integration: server-only credentials, admin-only subscriber management.
+const CHIPBASE_URL=(process.env.CHIPBASE_URL||'https://chipbase-api.onrender.com').replace(/\/$/,'');
+const CHIPBASE_PROJECT_ID=process.env.CHIPBASE_PROJECT_ID;
+const CHIPBASE_API_KEY=process.env.CHIPBASE_API_KEY;
+const chipbaseReady=()=>Boolean(CHIPBASE_PROJECT_ID&&CHIPBASE_API_KEY);
+async function chipbaseSubscribers(method,values){
+  if(!chipbaseReady())return {status:503,data:{error:'Chipbase integration is not configured'}};
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),10000);
+  try{
+    const response=await fetch(CHIPBASE_URL+'/api/data/'+encodeURIComponent(CHIPBASE_PROJECT_ID)+'/subscribers',{
+      method,headers:{Authorization:'Bearer '+CHIPBASE_API_KEY,...(values?{'Content-Type':'application/json'}:{})},
+      ...(values?{body:JSON.stringify({values})}:{}),signal:controller.signal
+    });
+    const data=await response.json().catch(()=>({error:'Invalid Chipbase response'}));
+    return {status:response.status,data};
+  }finally{clearTimeout(timeout)}
+}
+app.get('/api/chipbase/subscribers',authenticate,admin,wrap(async(_req,res)=>{
+  const result=await chipbaseSubscribers('GET');
+  res.status(result.status).json(result.data);
+}));
+app.post('/api/chipbase/subscribers',authenticate,admin,wrap(async(req,res)=>{
+  const {title,name,email}=req.body||{};
+  if(typeof name!=='string'||name.trim().length<2||name.length>80||
+     typeof email!=='string'||!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)||email.length>254||
+     (title!==undefined&&(typeof title!=='string'||title.length>100)))
+    return res.status(400).json({error:'Valid subscriber name and email required'});
+  const result=await chipbaseSubscribers('POST',{name:name.trim(),email:email.trim().toLowerCase(),...(title?{title:title.trim()}:{})});
+  res.status(result.status).json(result.data);
+}));
 app.get('/api/health',(_req,res)=>res.json({ok:true}));
 app.use((err,req,res,next)=>{console.error(err);res.status(500).json({error:'Internal server error'})});
 await pool.query(await readFile(new URL('./schema.sql',import.meta.url),'utf8'));
