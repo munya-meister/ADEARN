@@ -5,7 +5,7 @@ import './style.css';
 const API=import.meta.env.DEV?'http://localhost:4000':'';
 async function request(path,method='GET',body){const response=await fetch(API+path,{method,headers:{'Content-Type':'application/json'},credentials:'include',body:body?JSON.stringify(body):undefined});const payload=await response.json();if(!response.ok)throw Error(payload.error||'Request failed');return payload}
 function App(){
- const[checkinBusy,setCheckinBusy]=useState(false),[checkinFeedback,setCheckinFeedback]=useState(null),user,setUser]=useState(null),[videos,setVideos]=useState([]),[tab,setTab]=useState('discover'),[loading,setLoading]=useState(true),[authMode,setAuthMode]=useState('login'),[form,setForm]=useState({name:'',email:'',password:''}),[error,setError]=useState(''),[notice,setNotice]=useState(''),[url,setUrl]=useState(''),[title,setTitle]=useState(''),[menu,setMenu]=useState(false);
+ const[checkinBusy,setCheckinBusy]=useState(false),[checkinFeedback,setCheckinFeedback]=useState(null),[user,setUser]=useState(null),[videos,setVideos]=useState([]),[tab,setTab]=useState('discover'),[loading,setLoading]=useState(true),[authMode,setAuthMode]=useState('login'),[form,setForm]=useState({name:'',email:'',password:''}),[error,setError]=useState(''),[notice,setNotice]=useState(''),[url,setUrl]=useState(''),[title,setTitle]=useState(''),[menu,setMenu]=useState(false);
  async function refresh(){try{setUser((await request('/api/me')).user)}catch{setUser(null)}try{setVideos((await request('/api/videos')).videos)}catch{}setLoading(false)}
  useEffect(()=>{refresh()},[]);
  async function auth(e){e.preventDefault();setError('');try{await request('/api/auth/'+(authMode==='login'?'login':'register'),'POST',form);await refresh()}catch(err){setError(err.message)}}
