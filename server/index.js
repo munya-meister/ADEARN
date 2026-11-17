@@ -19,7 +19,7 @@ app.use(express.json({limit:'10kb'}));
 app.use(cookieParser());
 app.use('/api/auth',rateLimit({windowMs:15*60*1000,limit:25,standardHeaders:'draft-7',legacyHeaders:false}));
 const q=(s,p=[])=>pool.query(s,p);
-const safe=u=>({id:u.id,name:u.name,email:u.email,xp:Number(u.xp),isAdmin:u.is_admin});
+const safe=u=>({id:u.id,name:u.name,email:u.email,xp:Number(u.xp),isAdmin:u.is_admin,leaderboardOptIn:Boolean(u.leaderboard_opt_in)});
 const cookies={httpOnly:true,secure:NODE_ENV==='production',sameSite:NODE_ENV==='production'?'none':'lax',path:'/',maxAge:604800000};
 const sign=u=>jwt.sign({sub:u.id},JWT_SECRET,{expiresIn:'7d'});
 const wrap=f=>(req,res,next)=>Promise.resolve(f(req,res,next)).catch(next);
@@ -33,6 +33,16 @@ app.get('/api/videos',wrap(async(_req,res)=>{const {rows}=await q('SELECT id,tit
 function youtubeId(link){try{const u=new URL(link);const h=u.hostname.toLowerCase();let id;if(h==='youtu.be')id=u.pathname.split('/')[1];else if(['youtube.com','www.youtube.com','m.youtube.com'].includes(h))id=u.pathname==='/watch'?u.searchParams.get('v'):u.pathname.match(/^\/(?:shorts|embed)\/([^/]+)/)?.[1];return /^[a-zA-Z0-9_-]{11}$/.test(id||'')?id:null}catch{return null}}
 app.post('/api/videos',authenticate,admin,wrap(async(req,res)=>{const {title,url}=req.body||{};const videoId=typeof url==='string'?youtubeId(url):null;if(typeof title!=='string'||!title.trim()||title.length>150||!videoId)return res.status(400).json({error:'Valid title and YouTube URL required'});const {rows}=await q('INSERT INTO videos(title,youtube_id) VALUES($1,$2) RETURNING id,title,youtube_id AS "youtubeId"',[title.trim(),videoId]);res.status(201).json({video:rows[0]})}));
 app.delete('/api/videos/:id',authenticate,admin,wrap(async(req,res)=>{if(!/^[0-9a-f-]{36}$/i.test(req.params.id))return res.status(400).json({error:'Invalid video ID'});await q('DELETE FROM videos WHERE id=$1',[req.params.id]);res.json({ok:true})}));
+// Only opted-in fans appear; never expose email addresses or account IDs.
+app.get('/api/leaderboard',authenticate,wrap(async(req,res)=>{
+ const {rows}=await q('SELECT name,xp FROM users WHERE leaderboard_opt_in=TRUE ORDER BY xp DESC, created_at ASC LIMIT 50');
+ res.json({leaders:rows.map((u,i)=>({rank:i+1,name:u.name,xp:Number(u.xp)}))});
+}));
+app.post('/api/leaderboard/preferences',authenticate,wrap(async(req,res)=>{
+ if(typeof req.body?.optIn!=='boolean')return res.status(400).json({error:'optIn must be true or false'});
+ const {rows}=await q('UPDATE users SET leaderboard_opt_in=$1 WHERE id=$2 RETURNING *',[req.body.optIn,req.user.id]);
+ res.json({user:safe(rows[0])});
+}));
 app.get('/api/checkin/status',authenticate,wrap(async(req,res)=>{const {rows}=await q("SELECT EXISTS(SELECT 1 FROM checkins WHERE user_id=$1 AND day=(NOW() AT TIME ZONE 'UTC')::date) AS claimed",[req.user.id]);res.json({claimedToday:rows[0].claimed})}));
 app.post('/api/checkin',authenticate,wrap(async(req,res)=>{const client=await pool.connect();try{await client.query('BEGIN');const result=await client.query("INSERT INTO checkins(user_id,day) VALUES($1,(NOW() AT TIME ZONE 'UTC')::date) ON CONFLICT DO NOTHING RETURNING user_id",[req.user.id]);if(!result.rowCount){await client.query('ROLLBACK');return res.status(409).json({error:'You already checked in today'})}await client.query('UPDATE users SET xp=xp+50 WHERE id=$1',[req.user.id]);await client.query('COMMIT');res.json({earned:50})}catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}}));
 // Chipbase integration: server-only credentials, admin-only subscriber management.
